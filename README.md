@@ -116,6 +116,34 @@ To clean build artifacts:
 make clean
 ```
 
+### Compilation Themes & Automation Script
+
+To make the rescue GUI highly customizable without introducing runtime configuration file dependencies (keeping it 100% standalone, freestanding, and memory-safe), the theming system is fully compiled-in.
+
+#### 1. Theme Folder Structure
+Each theme is stored in a subfolder under `assets/` (e.g., `assets/base/`, `assets/color/`, `assets/tech/`) and contains:
+- `cad_theme.conf` : Configuration file defining UI dimensions (windows size, layouts) and colors (XRGB format).
+- `font.ttf` : TrueType font file embedded into the C header (`custom_font.h`).
+- `pointer` : Xcursor pointer file defining the custom ARGB hardware-level mouse cursor.
+- `.png` files : Custom assets for the 14 UI system icons.
+
+#### 2. The Build Wrapper (`build.sh`)
+An automation wrapper script, `build.sh`, coordinates the generation of assets and final compilation:
+```bash
+./build.sh [theme_name] [compress_mode]
+```
+
+**Parameters:**
+- `theme_name` : The name of the theme directory inside `assets/` (e.g., `base`, `color`, `tech`). Default is `base`.
+- `compress_mode` : The compression algorithm for the embedded GUI payload: `lz4` (near-instant compilation, good for dev) or `zx0` (maximum optimal compression, recommended for production). Default is `lz4`.
+
+**What the script does under the hood:**
+1. Copies the selected theme files into the temporary compilation assets folder `assets_build/`.
+2. Compiles and executes the native host utility `theme_generator` to parse the theme config file and produce `cad_theme.h`.
+3. Runs `convert_pngs.py` to compile the TTF font, Xcursor file, and PNG icons into inline C byte arrays (e.g., `custom_font.h`, `cursor_data.h`, and `*_icon.h`).
+4. Performs a `make clean` and invokes `make` with the chosen `COMPRESS` mode to build the final `lnxcad` executable.
+
+
 ## Disaster & Hardware Failure Resilience (Zero-Trust Analysis)
 
 **CAD Rescue GUI** is engineered as a "zero-trust" utility, specifically designed to remain operational and responsive when the underlying system is experiencing severe hardware failures (such as a dying disk, read-only filesystem lock, or missing system binaries).
