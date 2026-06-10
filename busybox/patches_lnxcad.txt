@@ -1,0 +1,77 @@
+# Patches for BusyBox lnxCAD Rescue
+# Apply these modifications to source code before compilation
+
+## PATCH 1: libbb/appletlib.c - Direct shell launch with prompt
+## Line: ~1120-1130
+
+Replace the "if (!argv[1])" block with:
+
+```c
+if (!argv[1]) {
+    extern int ash_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
+    putenv("PS1=root:$PWD# ");
+    char *sh_argv[] = { "sh", NULL };
+    return ash_main(1, sh_argv);
+}
+```
+
+## PATCH 2: shell/ash.c - Custom banner
+## Line: ~10155
+
+Replace:
+```c
+out1fmt(
+    "%s %s (%s)\n"
+    IF_FEATURE_SH_EMBEDDED_SCRIPTS(
+    "Enter 'help' for a list of built-in commands."
+    "\n\n"
+    )
+    , bb_banner
+    , "built-in shell (ash)"
+    , bb_msg_memory_exhausted
+);
+```
+
+With:
+```c
+out1fmt("%s %s - custom lnxCAD version\n",
+    bb_banner,
+    "built-in shell (ash)"
+);
+```
+
+## PATCH 3: libbb/messages.c - Version without timestamp
+## Line: ~14
+
+Replace:
+```c
+const char bb_banner[] ALIGN1 = "BusyBox v" BB_VER " (" BB_BT ")";
+```
+
+With:
+```c
+const char bb_banner[] ALIGN1 = "BusyBox v" BB_VER;
+```
+
+## Applying Patches
+
+### Manual Method:
+1. Open each file in an editor
+2. Locate the indicated lines
+3. Apply modifications
+
+### Verification:
+```bash
+# Verify modifications are present
+grep -n "putenv(\"PS1=root:\$PWD# \");" libbb/appletlib.c
+grep -n "custom lnxCAD version" shell/ash.c
+grep -n 'const char bb_banner\[\] ALIGN1 = "BusyBox v" BB_VER;' libbb/messages.c
+```
+
+### After Application:
+```bash
+# Recompile
+make clean
+make -j$(nproc) CC=musl-gcc CFLAGS="-Os -static" LDFLAGS="-static"
+strip --strip-all busybox
+sstrip busybox

@@ -1,0 +1,28 @@
+# Ignorer UNIQUEMENT les binaires compilés à la racine
+/lnxcad
+/cad_watchdog
+/cad_rescue_gui
+/bin_packer
+/theme_generator
+# Ignorer UNIQUEMENT les headers temporaires générés à la racine
+/gui_payload.h
+/cad_theme.h
+/cursor_data.h
+/custom_font.h
+/sleep_icon.h
+/power_icon.h
+/restart_icon.h
+/shutdown_icon.h
+/terminal_icon.h
+/find_icon.h
+/check1_icon.h
+/check2_icon.h
+/close_icon.h
+/runcommand_icon.h
+/console_icon.h
+/taskmgr_icon.h
+/password_icon.h
+/branding_icon.h
+# Ignorer UNIQUEMENT les dossiers de compilation de travail de la racine
+/__work/
+/include_compat/
