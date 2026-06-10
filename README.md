@@ -1,4 +1,4 @@
-# CAD (Ctrl-Alt-Del) Rescue GUI
+# lnxCAD (Ctrl-Alt-Del) Rescue GUI
 
 **CAD Rescue GUI** is a standalone system rescue utility for Linux (written in C99, using `libdrm`, with no major external dependencies). It invokes a graphical emergency interface (similar to the Windows Ctrl+Alt+Del screen) in a foolproof manner, even in the event of a total freeze of the desktop environment (X11/Wayland) or extreme saturation of hardware resources.
 
