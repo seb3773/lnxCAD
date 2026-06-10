@@ -26,3 +26,6 @@
 # Ignorer UNIQUEMENT les dossiers de compilation de travail de la racine
 /__work/
 /include_compat/
+
+# Configuration VS Code
+.vscode/
