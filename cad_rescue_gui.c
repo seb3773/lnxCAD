@@ -1549,6 +1549,7 @@ struct {
     uint32_t fb_id[2];
     
     struct drm_mode_crtc saved_crtc;
+    int double_buffered;
 } drm;
 
 static void trigger_sysrq(char key) {
@@ -2457,7 +2458,8 @@ int init_drm() {
     drm.width = drm.mode.hdisplay;
     drm.height = drm.mode.vdisplay;
     
-    /* 3. Allouer les "Dumb Buffers" pour le Double Buffering */
+    /* 3. Allouer les "Dumb Buffers" pour le Double Buffering (avec fallback en Single Buffer si echec) */
+    drm.double_buffered = 1;
     for (int i = 0; i < 2; i++) {
         struct drm_mode_create_dumb create_dumb = {0};
         create_dumb.width = drm.width;
@@ -2466,6 +2468,11 @@ int init_drm() {
         
         if (drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_CREATE_DUMB, &create_dumb) < 0) {
             DEBUG_LOG("[ERROR] DRM_IOCTL_MODE_CREATE_DUMB");
+            if (i == 1) {
+                DEBUG_LOG("[WARNING] Fallback to single buffering (creation of second buffer failed)");
+                drm.double_buffered = 0;
+                break;
+            }
             cleanup_drm();
             return -1;
         }
@@ -2485,6 +2492,14 @@ int init_drm() {
         
         if (drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_ADDFB, &cmd) < 0) {
             DEBUG_LOG("[ERROR] DRM_IOCTL_MODE_ADDFB");
+            if (i == 1) {
+                DEBUG_LOG("[WARNING] Fallback to single buffering (ADDFB of second buffer failed)");
+                struct drm_mode_destroy_dumb dd = { .handle = drm.handle[1] };
+                drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_DESTROY_DUMB, &dd);
+                drm.handle[1] = 0;
+                drm.double_buffered = 0;
+                break;
+            }
             cleanup_drm();
             return -1;
         }
@@ -2496,6 +2511,16 @@ int init_drm() {
         
         if (drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_MAP_DUMB, &map_dumb) < 0) {
             DEBUG_LOG("[ERROR] DRM_IOCTL_MODE_MAP_DUMB");
+            if (i == 1) {
+                DEBUG_LOG("[WARNING] Fallback to single buffering (MAP_DUMB of second buffer failed)");
+                drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_RMFB, &drm.fb_id[1]);
+                drm.fb_id[1] = 0;
+                struct drm_mode_destroy_dumb dd = { .handle = drm.handle[1] };
+                drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_DESTROY_DUMB, &dd);
+                drm.handle[1] = 0;
+                drm.double_buffered = 0;
+                break;
+            }
             cleanup_drm();
             return -1;
         }
@@ -2503,6 +2528,16 @@ int init_drm() {
         drm.buffer[i] = mmap(0, drm.size, PROT_READ | PROT_WRITE, MAP_SHARED, journal.drm_fd, map_dumb.offset);
         if (drm.buffer[i] == MAP_FAILED) {
             DEBUG_LOG("[ERROR] mmap");
+            if (i == 1) {
+                DEBUG_LOG("[WARNING] Fallback to single buffering (mmap of second buffer failed)");
+                drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_RMFB, &drm.fb_id[1]);
+                drm.fb_id[1] = 0;
+                struct drm_mode_destroy_dumb dd = { .handle = drm.handle[1] };
+                drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_DESTROY_DUMB, &dd);
+                drm.handle[1] = 0;
+                drm.double_buffered = 0;
+                break;
+            }
             cleanup_drm();
             return -1;
         }
@@ -3681,7 +3716,7 @@ int main() {
     int click_cooldown = 0;
 
     while (running) {
-        int back_buf = front_buf ^ 1;
+        int back_buf = drm.double_buffered ? (front_buf ^ 1) : 0;
         rawfb->fb.pixels = drm.buffer[back_buf];
         int prev_show_terminal = show_terminal;
         int cp_enter_pressed = 0;
@@ -6101,22 +6136,43 @@ int main() {
             draw_cursor(drm.buffer[back_buf], drm.width, drm.height, drm.pitch, mouse_x, mouse_y);
         }
 
-        /* 6. Affichage du buffer préparé (SETCRTC la première fois, puis PAGE_FLIP) */
-        if (frame_count == 1) {
-            struct drm_mode_crtc crtc = {0};
-            crtc.crtc_id = drm.crtc_id;
-            crtc.fb_id = drm.fb_id[back_buf];
-            crtc.set_connectors_ptr = (uint64_t)(uintptr_t)&drm.conn_id;
-            crtc.count_connectors = 1;
-            crtc.mode = drm.mode;
-            crtc.mode_valid = 1;
-            drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_SETCRTC, &crtc);
-        } else {
-            struct drm_mode_crtc_page_flip flip = {0};
-            flip.fb_id = drm.fb_id[back_buf];
-            flip.crtc_id = drm.crtc_id;
-            flip.flags = 0;
-            drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_PAGE_FLIP, &flip);
+        /* 6. Affichage du buffer préparé (SETCRTC la première fois, puis PAGE_FLIP ou DIRTYFB) */
+        if (drm.double_buffered) {
+            if (frame_count == 1) {
+                struct drm_mode_crtc crtc = {0};
+                crtc.crtc_id = drm.crtc_id;
+                crtc.fb_id = drm.fb_id[back_buf];
+                crtc.set_connectors_ptr = (uint64_t)(uintptr_t)&drm.conn_id;
+                crtc.count_connectors = 1;
+                crtc.mode = drm.mode;
+                crtc.mode_valid = 1;
+                drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_SETCRTC, &crtc);
+            } else {
+                struct drm_mode_crtc_page_flip flip = {0};
+                flip.fb_id = drm.fb_id[back_buf];
+                flip.crtc_id = drm.crtc_id;
+                flip.flags = 0;
+                if (drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_PAGE_FLIP, &flip) < 0) {
+                    DEBUG_LOG("[WARNING] DRM_IOCTL_MODE_PAGE_FLIP failed. Falling back to single buffering.");
+                    drm.double_buffered = 0;
+                    // Forcer la synchronisation avec le premier buffer
+                    struct drm_mode_crtc crtc = {0};
+                    crtc.crtc_id = drm.crtc_id;
+                    crtc.fb_id = drm.fb_id[0];
+                    crtc.set_connectors_ptr = (uint64_t)(uintptr_t)&drm.conn_id;
+                    crtc.count_connectors = 1;
+                    crtc.mode = drm.mode;
+                    crtc.mode_valid = 1;
+                    drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_SETCRTC, &crtc);
+                }
+            }
+        }
+        
+        if (!drm.double_buffered) {
+            struct drm_mode_fb_dirty_cmd dirty = {0};
+            dirty.fb_id = drm.fb_id[0];
+            dirty.num_clips = 0;
+            drm_ioctl(journal.drm_fd, DRM_IOCTL_MODE_DIRTYFB, &dirty);
         }
         
         if (prev_show_terminal && !show_terminal) {

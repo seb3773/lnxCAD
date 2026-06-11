@@ -29,3 +29,7 @@
 
 # Configuration VS Code
 .vscode/
+
+# Debian package build artifacts
+*.deb
+/lnxcad_*_amd64/

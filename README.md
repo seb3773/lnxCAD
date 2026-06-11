@@ -74,6 +74,118 @@ To ensure this interface always displays and responds, regardless of how degrade
 - **Zero-Waste Conditional Compilation**: The logo is guarded by a compile-time directive (`#if HAS_BRANDING`). If the logo source (`assets_build/branding.png`) is missing at build time, the build system generates a dummy header defining `HAS_BRANDING 0`, and the compiler completely strips out all variables, structures, and rendering calls associated with the branding logic, ensuring zero waste of memory or binary size.
 - **Pure Software Canvas Placement**: Renders directly inside a transparent window using Nuklear's software drawing commands mapped onto a static layout row (`nk_layout_row_static`), ensuring stable screen-space bounds.
 
+## System Architecture & Sequence Flows
+
+Visualizing the key architectural components, boot synchronization, and fallback logic of **lnxCAD**.
+
+### 1. System Architecture Diagram
+Illustrates how the watchdog daemon runs persistently, grabs inputs, and executes the rescue GUI entirely from an in-memory `memfd` file descriptor.
+
+```mermaid
+graph TD
+    subgraph Userspace (X11 / Wayland Session)
+        UserSession["User Desktop Session (Gnome / KDE / TDE)"]
+    end
+
+    subgraph Kernel / HW Level
+        KbdDev["/dev/input/event* (Keyboard)"]
+        MouseDev["/dev/input/mouse* (Mouse)"]
+        DrmDev["/dev/dri/card* (DRM/KMS)"]
+        SysPower["/sys/power/state"]
+        ProcFS["/proc & /sys"]
+    end
+
+    subgraph lnxCAD Watchdog Daemon (Root)
+        WD["cad_watchdog (PID 1 / Init Managed)"]
+        MemFD["memfd_create (In-Memory GUI Binary)"]
+        
+        WD -.->|Monitors shortcut| KbdDev
+        WD -->|Decompresses & Runs| GUI["cad_rescue_gui (fexecve)"]
+    end
+
+    subgraph Emergency GUI Components (In-Memory)
+        Nuklear["Nuklear UI Engine (Rawfb)"]
+        VTE["libtsm (Terminal Emulator)"]
+        PTY["shl-pty (PTY Bridge)"]
+        EmbeddedBB["Embedded BusyBox Shell (memfd)"]
+        TaskMgr["Task Manager (Zero-allocation /proc scanner)"]
+    end
+
+    GUI -->|Exclusive Grab| KbdDev
+    GUI -->|Read Events| MouseDev
+    GUI -->|Direct Scanout / Page Flip| DrmDev
+    GUI -->|Syscall Reboot / Poweroff| SysPower
+    TaskMgr -->|Scan PIDs| ProcFS
+    VTE <--> PTY <--> EmbeddedBB
+```
+
+### 2. Boot & Switch Sequence (Ctrl+Alt+Del Trigger)
+Depicts the execution sequence when the user triggers the rescue hotkey, taking mastership of inputs and display.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User
+    participant Sys as Linux Kernel
+    participant WD as cad_watchdog
+    participant Desktop as Compositor (X11/Wayland)
+    participant GUI as cad_rescue_gui
+    
+    User->>Sys: Presses Ctrl+Alt+Del
+    Sys->>WD: Raw keyboard event read
+    Note over WD: Watchdog intercepts CAD event
+    WD->>Desktop: Steal active Virtual Terminal (steal_vt)
+    Desktop->>Sys: Relinquishes DRM mastership (best-effort)
+    WD->>Sys: fexecve() GUI from memfd
+    activate GUI
+    GUI->>Sys: Acquire DRM Master (DRM_IOCTL_SET_MASTER)
+    GUI->>Sys: Grab raw keyboard (EVIOCGRAB)
+    GUI->>Sys: Force screen wake-up & set mode (SETCRTC)
+    Note over GUI: Rendering loop starts
+    GUI->>User: Displays Emergency UI
+    Note over GUI: User performs actions (e.g. kill task, open shell)
+    User->>GUI: Clicks Cancel / Close
+    GUI->>Sys: Release Keyboard grab
+    GUI->>Sys: Drop DRM Master (DRM_DROP_MASTER)
+    GUI->>Sys: Restore saved CRTC mode & VT (KD_TEXT)
+    deactivate GUI
+    Sys->>Desktop: Returns to user session VT
+```
+
+### 3. DRM Rendering & Buffer Fallback Tree
+Details the render pipeline's decision tree when double-buffering page flips fail, falling back dynamically to a single-buffer layout with dirty frame flushes.
+
+```mermaid
+graph TD
+    Start["Start DRM Setup in init_drm()"] --> TryDB["Allocate 2 Dumb Buffers (Double Buffering)"]
+    TryDB -->|Success| SetCRTC1["Call SETCRTC pointing to Framebuffer 0"]
+    SetCRTC1 --> Loop["Start Render Loop"]
+    
+    TryDB -->|Failure on Buffer 2| WarnInit["Log Warning: Fail to allocate Buffer 2"]
+    WarnInit --> FallbackInit["Set double_buffered = 0"]
+    FallbackInit --> SetCRTC1
+    
+    Loop --> CheckMode{Is double_buffered?}
+    
+    CheckMode -->|Yes| DrawBack["Draw frame to back_buf (index 1-front)"]
+    DrawBack --> CheckFrame{frame_count == 1?}
+    CheckFrame -->|Yes| SetCRTCFrame["Call SETCRTC with back_buf"]
+    CheckFrame -->|No| PageFlip["Call DRM_IOCTL_MODE_PAGE_FLIP"]
+    
+    PageFlip -->|Success| SwapBuf["Swap front_buf and back_buf"]
+    SwapBuf --> Loop
+    
+    PageFlip -->|Failure (Glitch/Driver Refusal)| WarnFlip["Log Warning: PAGE_FLIP failed"]
+    WarnFlip --> SetSingle["Set double_buffered = 0"]
+    SetSingle --> ForceCRTC["Call SETCRTC pointing to Buffer 0"]
+    ForceCRTC --> DrawSingle["Draw frame directly to buffer 0"]
+    
+    CheckMode -->|No| DrawSingle
+    DrawSingle --> DirtyFB["Call DRM_IOCTL_MODE_DIRTYFB on Buffer 0"]
+    DirtyFB --> Sleep["nanosleep (~60 FPS)"]
+    Sleep --> Loop
+```
+
 ## Technical Development & Compilation
 
 The project relies on:
@@ -144,6 +256,63 @@ An automation wrapper script, `build.sh`, coordinates the generation of assets a
 4. Performs a `make clean` and invokes `make` with the chosen `COMPRESS` mode to build the final `lnxcad` executable.
 
 
+## Installation & Deployment
+
+lnxCAD runs as a root watchdog process started automatically at system boot. The project provides two automation scripts to handle setup and startup service registration.
+
+### 1. Standalone Installer (`install.sh`)
+
+The standalone installer detects your system init daemon and configures lnxCAD to start automatically at boot with high priority.
+
+#### Installation
+Run the script as root:
+```bash
+sudo ./install.sh install
+```
+*Note: The script searches for a compiled `lnxcad` binary in the current directory or uses the precompiled ones under `precompiled_binairies/base/`.*
+
+#### Uninstallation
+To completely remove the service and the binary:
+```bash
+sudo ./install.sh uninstall
+```
+
+#### Supported Init Systems:
+- **systemd** : Installs `/etc/systemd/system/lnxcad.service` with automatic respawn (`Restart=always`), real-time scheduling priority (`Nice=-20`), and OOM killer immunity.
+- **SysVinit / OpenRC (inittab)** : Registers `lnxcad` using `respawn` inside `/etc/inittab` if available, enabling robust PID 1 native daemon supervision.
+- **SysVinit / OpenRC (init.d)** : Fallback helper script installed in `/etc/init.d/lnxcad` and registered via `update-rc.d`, `chkconfig`, or `rc-update`.
+- **runit** : Configures a runit service directory `/etc/sv/lnxcad` and registers it in your active service folder (e.g. `/var/service`).
+- **rc.local** : Universal fallback starting the daemon in the background from `/etc/rc.local`.
+
+---
+
+### 2. Debian Packaging (`build_deb.sh`)
+
+If you want to deploy lnxCAD on multiple Debian/Ubuntu servers, you can build a native `.deb` package containing the precompiled binary and post-installation hooks.
+
+#### Building the Package
+```bash
+./build_deb.sh
+```
+This builds a package named `lnxcad_1.0_amd64.deb` which contains the compiled `lnxcad` watchdog binary and configures the startup hook scripts under `DEBIAN/`.
+
+#### Deploying the Package
+```bash
+sudo dpkg -i lnxcad_1.0_amd64.deb
+```
+The package has **no dependencies** (since `lnxcad` is built statically), and automatically invokes the init detection logic during its `postinst` stage to configure and start the daemon.
+
+#### Removing the Package
+To stop the service and remove the binary:
+```bash
+sudo dpkg -r lnxcad
+```
+To purge service configs and unit files:
+```bash
+sudo dpkg -P lnxcad
+```
+
+
 ## Disaster & Hardware Failure Resilience (Zero-Trust Analysis)
 
 **CAD Rescue GUI** is engineered as a "zero-trust" utility, specifically designed to remain operational and responsive when the underlying system is experiencing severe hardware failures (such as a dying disk, read-only filesystem lock, or missing system binaries).
@@ -167,6 +336,20 @@ The utility only interacts with two types of files at runtime:
 
 
 ## Notes & Integration
+
+### Wayland & systemd-logind Compatibility
+
+Modern desktop environments using Wayland and `systemd-logind` (such as GNOME or KDE Plasma) enforce strict access control over inputs and display resources, which can introduce specific edge-case behaviors:
+
+1. **DRM Master Refusal**: In a Wayland session, the active compositor (Mutter, KWin) acquires DRM mastership under logind supervision. If `lnxCAD` attempts to call `ioctl(DRM_IOCTL_SET_MASTER)`, the kernel may deny the request or the compositor may automatically reclaim mastership, preventing standard double-buffered page flips.
+2. **VT Switching Blocks**: Modern compositors sometimes hook VT switch events (`VT_ACTIVATE`) or logind may restrict switches initiated outside a registered seat session.
+3. **Double-Buffering Glitches**: On certain Intel/AMD graphics chipsets running under strict display server setups, forced hardware modesetting can result in screen flickering or double-buffering page-flip errors.
+
+#### Architectural Mitigations & Fallbacks:
+To guarantee that the emergency interface displays under these conditions, `lnxCAD` implements the following mechanisms:
+- **Dynamic Single-Buffer Fallback**: If `DRM_IOCTL_MODE_PAGE_FLIP` fails during rendering (due to driver restrictions or mastership contention), the GUI immediately falls back to **Single-Buffer Mode**. It stops calling page flips, points the CRTC to Dumb Buffer 0, and switches to direct buffer drawing.
+- **Dirty Frame Notifications (`DIRTYFB`)**: In single-buffer mode, `lnxCAD` invokes `DRM_IOCTL_MODE_DIRTYFB` on every frame. This notifies the DRM driver (and virtualized rendering engines like QXL or VirtIO-GPU) to flush the modified screen regions, bypassing the need for a cooperative compositor or page flips.
+- **Console modesetting and muting**: During the takeover, the Virtual Terminal is forced into `KD_GRAPHICS` to prevent text output corruption, and kernel printk logs are muted.
 
 ### Terminal Escape Sequences under X11 (e.g. `^[[3;7~`)
 When invoking the rescue GUI using the Ctrl+Alt+Delete combination under X11, you might notice terminal escape sequences like `^[^[[3;7~` printed in the active console or text editor. This occurs because the watchdog daemon `lnxcad` runs as a low-level background process reading raw `/dev/input/event*` devices without grabbing the keyboard permanently (which would block input for your entire session). Consequently, the active window still receives the Ctrl+Alt+Delete key events and translates them into escape sequences.
