@@ -83,39 +83,39 @@ Illustrates how the watchdog daemon runs persistently, grabs inputs, and execute
 
 ```mermaid
 graph TD
-    subgraph Userspace ["Userspace - X11 / Wayland Session"]
-        UserSession["User Desktop Session - Gnome / KDE / TDE"]
+    subgraph Userspace
+        UserSession["User Desktop Session - Gnome - KDE - TDE"]
     end
 
-    subgraph Kernel ["Kernel / HW Level"]
-        KbdDev["Keyboard - /dev/input/event*"]
-        MouseDev["Mouse - /dev/input/mouse*"]
-        DrmDev["DRM/KMS - /dev/dri/card*"]
-        SysPower["Power Interface - /sys/power/state"]
-        ProcFS["Procfs and Sysfs - /proc and /sys"]
+    subgraph Kernel
+        KbdDev["Keyboard - dev-input-event"]
+        MouseDev["Mouse - dev-input-mouse"]
+        DrmDev["DRM KMS - dev-dri-card"]
+        SysPower["Power Interface - sys-power-state"]
+        ProcFS["Procfs and Sysfs - proc and sys"]
     end
 
-    subgraph Watchdog ["lnxCAD Watchdog Daemon - Root"]
-        WD["cad_watchdog - PID 1 / Init Managed"]
+    subgraph Watchdog
+        WD["cad_watchdog - PID 1 - Init Managed"]
         MemFD["memfd_create - In-Memory GUI Binary"]
         
-        WD -.->|Monitors shortcut| KbdDev
-        WD -->|Decompresses and Runs| GUI["cad_rescue_gui - fexecve"]
+        WD --> KbdDev
+        WD --> GUI["cad_rescue_gui - fexecve"]
     end
 
-    subgraph GUI_Comp ["Emergency GUI Components - In-Memory"]
+    subgraph GUI_Components
         Nuklear["Nuklear UI Engine - Rawfb"]
         VTE["libtsm - Terminal Emulator"]
         PTY["shl-pty - PTY Bridge"]
         EmbeddedBB["Embedded BusyBox Shell - memfd"]
-        TaskMgr["Task Manager - Zero-allocation /proc scanner"]
+        TaskMgr["Task Manager - Zero-allocation proc scanner"]
     end
 
-    GUI -->|Exclusive Grab| KbdDev
-    GUI -->|Read Events| MouseDev
-    GUI -->|Direct Scanout / Page Flip| DrmDev
-    GUI -->|Syscall Reboot / Poweroff| SysPower
-    TaskMgr -->|Scan PIDs| ProcFS
+    GUI --> KbdDev
+    GUI --> MouseDev
+    GUI --> DrmDev
+    GUI --> SysPower
+    TaskMgr --> ProcFS
     VTE --- PTY
     PTY --- EmbeddedBB
 ```
