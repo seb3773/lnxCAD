@@ -83,32 +83,32 @@ Illustrates how the watchdog daemon runs persistently, grabs inputs, and execute
 
 ```mermaid
 graph TD
-    subgraph Userspace (X11 / Wayland Session)
-        UserSession["User Desktop Session (Gnome / KDE / TDE)"]
+    subgraph Userspace ["Userspace - X11 / Wayland Session"]
+        UserSession["User Desktop Session - Gnome / KDE / TDE"]
     end
 
-    subgraph Kernel / HW Level
+    subgraph Kernel ["Kernel / HW Level"]
         KbdDev["/dev/input/event* (Keyboard)"]
         MouseDev["/dev/input/mouse* (Mouse)"]
         DrmDev["/dev/dri/card* (DRM/KMS)"]
         SysPower["/sys/power/state"]
-        ProcFS["/proc & /sys"]
+        ProcFS["/proc and /sys"]
     end
 
-    subgraph lnxCAD Watchdog Daemon (Root)
-        WD["cad_watchdog (PID 1 / Init Managed)"]
-        MemFD["memfd_create (In-Memory GUI Binary)"]
+    subgraph Watchdog ["lnxCAD Watchdog Daemon - Root"]
+        WD["cad_watchdog - PID 1 / Init Managed"]
+        MemFD["memfd_create - In-Memory GUI Binary"]
         
         WD -.->|Monitors shortcut| KbdDev
-        WD -->|Decompresses & Runs| GUI["cad_rescue_gui (fexecve)"]
+        WD -->|Decompresses and Runs| GUI["cad_rescue_gui - fexecve"]
     end
 
-    subgraph Emergency GUI Components (In-Memory)
-        Nuklear["Nuklear UI Engine (Rawfb)"]
-        VTE["libtsm (Terminal Emulator)"]
-        PTY["shl-pty (PTY Bridge)"]
-        EmbeddedBB["Embedded BusyBox Shell (memfd)"]
-        TaskMgr["Task Manager (Zero-allocation /proc scanner)"]
+    subgraph GUI_Comp ["Emergency GUI Components - In-Memory"]
+        Nuklear["Nuklear UI Engine - Rawfb"]
+        VTE["libtsm - Terminal Emulator"]
+        PTY["shl-pty - PTY Bridge"]
+        EmbeddedBB["Embedded BusyBox Shell - memfd"]
+        TaskMgr["Task Manager - Zero-allocation /proc scanner"]
     end
 
     GUI -->|Exclusive Grab| KbdDev
@@ -128,26 +128,26 @@ sequenceDiagram
     actor User as User
     participant Sys as Linux Kernel
     participant WD as cad_watchdog
-    participant Desktop as Compositor (X11/Wayland)
+    participant Desktop as Compositor - X11 / Wayland
     participant GUI as cad_rescue_gui
     
     User->>Sys: Presses Ctrl+Alt+Del
     Sys->>WD: Raw keyboard event read
     Note over WD: Watchdog intercepts CAD event
-    WD->>Desktop: Steal active Virtual Terminal (steal_vt)
-    Desktop->>Sys: Relinquishes DRM mastership (best-effort)
-    WD->>Sys: fexecve() GUI from memfd
+    WD->>Desktop: Steal active Virtual Terminal
+    Desktop->>Sys: Relinquishes DRM mastership - best-effort
+    WD->>Sys: fexecve GUI from memfd
     activate GUI
-    GUI->>Sys: Acquire DRM Master (DRM_IOCTL_SET_MASTER)
-    GUI->>Sys: Grab raw keyboard (EVIOCGRAB)
-    GUI->>Sys: Force screen wake-up & set mode (SETCRTC)
+    GUI->>Sys: Acquire DRM Master - DRM_IOCTL_SET_MASTER
+    GUI->>Sys: Grab raw keyboard - EVIOCGRAB
+    GUI->>Sys: Force screen wake-up and set mode - SETCRTC
     Note over GUI: Rendering loop starts
     GUI->>User: Displays Emergency UI
-    Note over GUI: User performs actions (e.g. kill task, open shell)
+    Note over GUI: User performs actions - e.g. kill task, open shell
     User->>GUI: Clicks Cancel / Close
     GUI->>Sys: Release Keyboard grab
-    GUI->>Sys: Drop DRM Master (DRM_DROP_MASTER)
-    GUI->>Sys: Restore saved CRTC mode & VT (KD_TEXT)
+    GUI->>Sys: Drop DRM Master - DRM_DROP_MASTER
+    GUI->>Sys: Restore saved CRTC mode and VT - KD_TEXT
     deactivate GUI
     Sys->>Desktop: Returns to user session VT
 ```
@@ -157,7 +157,7 @@ Details the render pipeline's decision tree when double-buffering page flips fai
 
 ```mermaid
 graph TD
-    Start["Start DRM Setup in init_drm()"] --> TryDB["Allocate 2 Dumb Buffers (Double Buffering)"]
+    Start["Start DRM Setup in init_drm"] --> TryDB["Allocate 2 Dumb Buffers - Double Buffering"]
     TryDB -->|Success| SetCRTC1["Call SETCRTC pointing to Framebuffer 0"]
     SetCRTC1 --> Loop["Start Render Loop"]
     
@@ -165,24 +165,21 @@ graph TD
     WarnInit --> FallbackInit["Set double_buffered = 0"]
     FallbackInit --> SetCRTC1
     
-    Loop --> CheckMode{Is double_buffered?}
+    Loop --> CheckMode{"Is double_buffered?"}
     
-    CheckMode -->|Yes| DrawBack["Draw frame to back_buf (index 1-front)"]
-    DrawBack --> CheckFrame{frame_count == 1?}
+    CheckMode -->|Yes| DrawBack["Draw frame to back_buf - index 1-front"]
+    DrawBack --> CheckFrame{"frame_count == 1?"}
     CheckFrame -->|Yes| SetCRTCFrame["Call SETCRTC with back_buf"]
     CheckFrame -->|No| PageFlip["Call DRM_IOCTL_MODE_PAGE_FLIP"]
     
-    PageFlip -->|Success| SwapBuf["Swap front_buf and back_buf"]
-    SwapBuf --> Loop
-    
-    PageFlip -->|Failure (Glitch/Driver Refusal)| WarnFlip["Log Warning: PAGE_FLIP failed"]
+    PageFlip -->|Page Flip Failure| WarnFlip["Log Warning: PAGE_FLIP failed"]
     WarnFlip --> SetSingle["Set double_buffered = 0"]
     SetSingle --> ForceCRTC["Call SETCRTC pointing to Buffer 0"]
     ForceCRTC --> DrawSingle["Draw frame directly to buffer 0"]
     
     CheckMode -->|No| DrawSingle
     DrawSingle --> DirtyFB["Call DRM_IOCTL_MODE_DIRTYFB on Buffer 0"]
-    DirtyFB --> Sleep["nanosleep (~60 FPS)"]
+    DirtyFB --> Sleep["nanosleep - ~60 FPS"]
     Sleep --> Loop
 ```
 
