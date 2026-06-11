@@ -2,6 +2,32 @@
 
 **CAD Rescue GUI** is a standalone system rescue utility for Linux (written in C99, using `libdrm`, with no major external dependencies). It invokes a graphical emergency interface (similar to the Windows Ctrl+Alt+Del screen) in a foolproof manner, even in the event of a total freeze of the desktop environment (X11/Wayland) or extreme saturation of hardware resources.
 
+## Concrete Use Case
+
+### Scenario: The Unresponsive Desktop
+1. **The Freeze**: You are working on your desktop, and a heavy compiler run or a buggy web browser tab completely saturates your CPU and RAM. The mouse pointer moves, but clicking anything does nothing. Keyboard shortcuts like `Ctrl+Alt+F3` (VT Switch) or running commands via SSH are unresponsive or time out.
+2. **The Recovery**: You press `Ctrl+Alt+Del`.
+3. **The Intervention**: 
+   - Within milliseconds, **lnxCAD** steals the virtual terminal, forces the monitor to wake up, grabs raw input events, and displays the rescue GUI directly from memory.
+   - You navigate to the **Task Manager** tab, sort processes by CPU or RAM usage, select the offending process (e.g., `chrome` or `gcc`), and click **Kill** (`SIGKILL`).
+4. **The Safe Return**: You click **Close** in the bottom-right corner. The screen restores your previous desktop compositor VT state, and your session resumes immediately with all other open windows intact.
+
+## Who is this for?
+
+**lnxCAD** is designed for anyone managing or using Linux machines under conditions where downtime or hard restarts must be avoided:
+- **System Administrators & DevOps**: Managing mission-critical servers, remote workstations, or kiosk systems where a service freeze shouldn't require a physical power cycle.
+- **Desktop Users**: Those who want a highly reliable "Ctrl+Alt+Del" manager (similar to Windows) that can rescue a frozen desktop environment (GNOME, KDE, TDE) without losing active work.
+- **High-Performance Computing (HPC) & Build Clusters**: Systems under extreme CPU/RAM saturation where standard SSH or terminal commands freeze due to swap-thrashing or OOM conditions.
+- **Headless GPU Servers**: AI/ML training and GPU-heavy rendering machines where the graphical stack may crash or lock up DRM mastership, requiring lower-level intervention.
+
+## Why not Magic SysRq / REISUB / systemd?
+
+While Linux provides built-in low-level kernel recovery tools, **lnxCAD** bridges a critical gap:
+- **Magic SysRq / REISUB**: Magic SysRq is a blunt instrument. It is either completely disabled for security reasons, or it only allows raw actions like killing *all* tasks (`SysRq+k`) or brutally rebooting (`SysRq+b`). **lnxCAD** lets you inspect and selectively target only the offending process, preserving the rest of your session.
+- **systemd / logind / coredump**: When systemd or logind itself freezes, becomes unresponsive, or is blocked by D-State I/O loops, standard service management commands fail. **lnxCAD** operates outside systemd session contexts, relying on raw direct kernel interfaces.
+- **GPU / Compositor Crash**: When the X11/Wayland display server crashes or enters a zombie state (holding DRM mastership), keyboard events are swallowed or the screen goes black. **lnxCAD** violently steals the VT and takes over the DRM frame buffer directly.
+- **Interactive Rescue**: Instead of a blind command, it provides a full, interactive ANSI terminal and process manager (completely pinned in RAM via `memfd` and `mlockall`), ensuring you can debug and repair the system on the spot.
+
 ## Resilience & Survival Architecture (Phases 1 & 2)
 
 To ensure this interface always displays and responds, regardless of how degraded the host system is, multiple low-level "safety nets" have been implemented in the code to bypass the traditional OS software hierarchy.
