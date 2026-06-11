@@ -88,11 +88,11 @@ graph TD
     end
 
     subgraph Kernel ["Kernel / HW Level"]
-        KbdDev["/dev/input/event* (Keyboard)"]
-        MouseDev["/dev/input/mouse* (Mouse)"]
-        DrmDev["/dev/dri/card* (DRM/KMS)"]
-        SysPower["/sys/power/state"]
-        ProcFS["/proc and /sys"]
+        KbdDev["Keyboard - /dev/input/event*"]
+        MouseDev["Mouse - /dev/input/mouse*"]
+        DrmDev["DRM/KMS - /dev/dri/card*"]
+        SysPower["Power Interface - /sys/power/state"]
+        ProcFS["Procfs and Sysfs - /proc and /sys"]
     end
 
     subgraph Watchdog ["lnxCAD Watchdog Daemon - Root"]
@@ -116,7 +116,8 @@ graph TD
     GUI -->|Direct Scanout / Page Flip| DrmDev
     GUI -->|Syscall Reboot / Poweroff| SysPower
     TaskMgr -->|Scan PIDs| ProcFS
-    VTE <--> PTY <--> EmbeddedBB
+    VTE --- PTY
+    PTY --- EmbeddedBB
 ```
 
 ### 2. Boot & Switch Sequence (Ctrl+Alt+Del Trigger)
