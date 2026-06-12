@@ -200,7 +200,7 @@ case "$1" in
     fi
     ;;
 esac
-EOF
+INNER_EOF
             chmod 755 /etc/init.d/lnxcad
             
             if which rc-update >/dev/null 2>&1; then
@@ -414,4 +414,3 @@ else
     echo "Ensure you are on a Debian-based system to run this script." >&2
     exit 1
 fi
-EOF
