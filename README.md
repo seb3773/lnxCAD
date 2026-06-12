@@ -384,3 +384,29 @@ To completely prevent this behavior, you can either:
 
 Since the desktop environment or `qsuperl` grabs the key combination, X11 will "eat" it (preventing any characters from being sent to your active window), while the low-level watchdog `lnxcad` will still receive the hardware event from the raw `/dev/input/event*` node and successfully launch the rescue GUI.
 
+
+## Screenshots & Gallery
+
+Here is a visual overview of the different emergency screens and diagnostic utilities built into **lnxCAD**:
+
+| **Main Menu & Options** | **Power Options Menu** |
+| :---: | :---: |
+| ![Main Menu](screenshots/screenshot_cad_main.png) <br> *The main Ctrl+Alt+Del intervention screen.* | ![Power Options](screenshots/screenshot_cad_main_shutdown_menu.png) <br> *Reboot, Shutdown, or Sleep options.* |
+
+| **Root Authentication** | **Run Command Box** |
+| :---: | :---: |
+| ![Root Authentication](screenshots/screenshot_cad_root_auth.png) <br> *Secure administrator privilege elevation.* | ![Run Command](screenshots/screenshot_cad_run_command.png) <br> *Execution box with root-privilege checkbox.* |
+
+| **Change Password** | **Switch Session Menu** |
+| :---: | :---: |
+| ![Change Password](screenshots/screenshot_cad_change_pass.png) <br> *Emergency user password modification.* | ![Switch Session](screenshots/screenshot_cad_switch_session.png) <br> *Interactive multi-user VT display list.* |
+
+| **Task Manager (CPU Load)** | **Task Manager (Search)** |
+| :---: | :---: |
+| ![Task Manager CPU](screenshots/screenshot_cad_taskmgr_topcpu.png) <br> *Real-time process stats with Kill actions.* | ![Task Manager Search](screenshots/screenshot_cad_taskmgr_search.png) <br> *Filter processes dynamically by name.* |
+
+| **RAM-Backed BusyBox Shell** |
+| :---: |
+| ![BusyBox Shell](screenshots/screenshot_cad_busybox.png) <br> *Embedded static shell pinned in virtual memory.* |
+
+

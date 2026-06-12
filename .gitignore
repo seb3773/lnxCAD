@@ -33,3 +33,8 @@
 # Debian package build artifacts
 *.deb
 /lnxcad_*_amd64/
+
+# Demo and screenshot files
+/demo/
+/screenshot_cad_*
+
