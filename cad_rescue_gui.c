@@ -1101,6 +1101,115 @@ static int change_own_password(const char *oldpass, const char *newpass, char *o
 }
 
 static void detect_user_session(const char *username) {
+    int target_uid = -1;
+
+    // Si l'utilisateur est indéterminé, vide ou root, on fait la détection VT/proc active
+    if (!username || username[0] == '\0' || strcmp(username, "root") == 0) {
+        char vt_num[16] = {0};
+
+        // 1. Détecter le VT actif
+        int active_fd = open("/sys/class/tty/tty0/active", O_RDONLY);
+        if (active_fd >= 0) {
+            char active_name[64] = {0};
+            ssize_t n = read(active_fd, active_name, sizeof(active_name) - 1);
+            close(active_fd);
+            if (n > 0) {
+                while (n > 0 && (active_name[n-1] == '\n' || active_name[n-1] == '\r')) {
+                    active_name[n-1] = '\0';
+                    n--;
+                }
+                if (strncmp(active_name, "tty", 3) == 0) {
+                    safe_copy(vt_num, active_name + 3, sizeof(vt_num));
+                }
+            }
+        }
+
+        // 2. Chercher un processus avec XDG_VTNR=<vt_num> appartenant à un UID >= 1000
+        if (vt_num[0] != '\0') {
+            DIR *dir = opendir("/proc");
+            if (dir) {
+                struct dirent *ent;
+                while ((ent = readdir(dir)) != NULL) {
+                    if (ent->d_name[0] >= '1' && ent->d_name[0] <= '9') {
+                        char path[512];
+                        safe_copy(path, "/proc/", sizeof(path));
+                        safe_concat(path, ent->d_name, sizeof(path));
+
+                        struct stat st;
+                        if (stat(path, &st) == 0 && st.st_uid >= 1000 && st.st_uid < 60000) {
+                            safe_concat(path, "/environ", sizeof(path));
+                            int env_fd = open(path, O_RDONLY);
+                            if (env_fd >= 0) {
+                                char env_buf[4096];
+                                ssize_t bytes = read(env_fd, env_buf, sizeof(env_buf) - 1);
+                                close(env_fd);
+                                if (bytes > 0) {
+                                    env_buf[bytes] = '\0';
+                                    char *p = env_buf;
+                                    while (p < env_buf + bytes) {
+                                        char *end = memchr(p, '\0', env_buf + bytes - p);
+                                        if (!end) break;
+                                        char expected[32];
+                                        safe_copy(expected, "XDG_VTNR=", sizeof(expected));
+                                        safe_concat(expected, vt_num, sizeof(expected));
+                                        if (strcmp(p, expected) == 0) {
+                                            target_uid = st.st_uid;
+                                            break;
+                                        }
+                                        p = end + 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (target_uid >= 1000) break;
+                }
+                closedir(dir);
+            }
+        }
+
+        // 3. Fallback : n'importe quel processus graphique UID >= 1000 dans /proc
+        if (target_uid < 0) {
+            DIR *dir = opendir("/proc");
+            if (dir) {
+                struct dirent *ent;
+                while ((ent = readdir(dir)) != NULL) {
+                    if (ent->d_name[0] >= '1' && ent->d_name[0] <= '9') {
+                        char path[512];
+                        safe_copy(path, "/proc/", sizeof(path));
+                        safe_concat(path, ent->d_name, sizeof(path));
+
+                        struct stat st;
+                        if (stat(path, &st) == 0 && st.st_uid >= 1000 && st.st_uid < 60000) {
+                            safe_concat(path, "/environ", sizeof(path));
+                            int env_fd = open(path, O_RDONLY);
+                            if (env_fd >= 0) {
+                                char env_buf[4096];
+                                ssize_t bytes = read(env_fd, env_buf, sizeof(env_buf) - 1);
+                                close(env_fd);
+                                if (bytes > 0) {
+                                    env_buf[bytes] = '\0';
+                                    char *p = env_buf;
+                                    while (p < env_buf + bytes) {
+                                        char *end = memchr(p, '\0', env_buf + bytes - p);
+                                        if (!end) break;
+                                        if (strncmp(p, "DISPLAY=", 8) == 0 || strncmp(p, "WAYLAND_DISPLAY=", 16) == 0) {
+                                            target_uid = st.st_uid;
+                                            break;
+                                        }
+                                        p = end + 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (target_uid >= 1000) break;
+                }
+                closedir(dir);
+            }
+        }
+    }
+
     /* 1. Résolution UID/GID via /etc/passwd */
     int fd = open("/etc/passwd", O_RDONLY);
     if (fd >= 0) {
@@ -1124,8 +1233,15 @@ static void detect_user_session(const char *username) {
                 
                 int uid = str_to_int(uid_str);
                 int is_match = 0;
-                if (username && username[0] && strcmp(user, username) == 0) is_match = 1;
-                else if ((!username || !username[0]) && uid >= 1000 && uid < 60000) is_match = 1;
+                if (target_uid >= 1000) {
+                    if (uid == target_uid) is_match = 1;
+                } else {
+                    if (username && username[0] && strcmp(user, username) == 0) {
+                        is_match = 1;
+                    } else if ((!username || !username[0] || strcmp(username, "root") == 0) && uid >= 1000 && uid < 60000) {
+                        is_match = 1;
+                    }
+                }
                 
                 if (is_match) {
                     user_session.uid = uid;
@@ -1382,23 +1498,34 @@ static void init_static_info() {
         safe_copy(hostname, uts.nodename, sizeof(hostname));
     }
     
-    const char *user = "root";
+    const char *user = NULL;
     extern char **environ;
     if (environ) {
         for (char **ep = environ; *ep != NULL; ep++) {
-            if (strncmp(*ep, "SUDO_USER=", 10) == 0) {
-                user = *ep + 10;
+            if (strncmp(*ep, "CAD_USER=", 9) == 0) {
+                user = *ep + 9;
                 break;
-            } else if (strncmp(*ep, "USER=", 5) == 0 && strcmp(user, "root") == 0) {
-                user = *ep + 5;
             }
         }
+        if (!user) {
+            for (char **ep = environ; *ep != NULL; ep++) {
+                if (strncmp(*ep, "SUDO_USER=", 10) == 0) {
+                    user = *ep + 10;
+                    break;
+                } else if (strncmp(*ep, "USER=", 5) == 0 && (!user || strcmp(user, "root") == 0)) {
+                    user = *ep + 5;
+                }
+            }
+        }
+    }
+    if (!user) {
+        user = "root";
     }
     
     detect_user_session(user);
     
     char cached_user_host[256] = {0};
-    safe_copy(cached_user_host, user, sizeof(cached_user_host));
+    safe_copy(cached_user_host, user_session.username, sizeof(cached_user_host));
     safe_concat(cached_user_host, " @ ", sizeof(cached_user_host));
     safe_concat(cached_user_host, hostname, sizeof(cached_user_host));
 

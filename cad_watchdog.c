@@ -457,6 +457,151 @@ int is_screen_locked() {
 }
 
 /*
+ * Détecte l'utilisateur actif de la session sur le VT courant ou un user graphique.
+ */
+static void detect_active_user(char *out_username, size_t max_len) {
+    out_username[0] = '\0';
+    char vt_num[16] = {0};
+    int found_uid = -1;
+
+    // 1. Lire le VT actif
+    int active_fd = open("/sys/class/tty/tty0/active", O_RDONLY);
+    if (active_fd >= 0) {
+        char active_name[64] = {0};
+        ssize_t n = read(active_fd, active_name, sizeof(active_name) - 1);
+        close(active_fd);
+        if (n > 0) {
+            while (n > 0 && (active_name[n-1] == '\n' || active_name[n-1] == '\r')) {
+                active_name[n-1] = '\0';
+                n--;
+            }
+            if (strncmp(active_name, "tty", 3) == 0) {
+                safe_copy(vt_num, active_name + 3, sizeof(vt_num));
+            }
+        }
+    }
+
+    // 2. Chercher un processus avec XDG_VTNR=<vt_num> appartenant à un UID >= 1000
+    if (vt_num[0] != '\0') {
+        DIR *dir = opendir("/proc");
+        if (dir) {
+            struct dirent *ent;
+            while ((ent = readdir(dir)) != NULL) {
+                if (ent->d_name[0] >= '1' && ent->d_name[0] <= '9') {
+                    char path[512];
+                    snprintf(path, sizeof(path), "/proc/%s", ent->d_name);
+                    struct stat st;
+                    if (stat(path, &st) == 0 && st.st_uid >= 1000 && st.st_uid < 60000) {
+                        snprintf(path, sizeof(path), "/proc/%s/environ", ent->d_name);
+                        int env_fd = open(path, O_RDONLY);
+                        if (env_fd >= 0) {
+                            char env_buf[4096];
+                            ssize_t bytes = read(env_fd, env_buf, sizeof(env_buf) - 1);
+                            close(env_fd);
+                            if (bytes > 0) {
+                                env_buf[bytes] = '\0';
+                                char *p = env_buf;
+                                while (p < env_buf + bytes) {
+                                    char *end = memchr(p, '\0', env_buf + bytes - p);
+                                    if (!end) break;
+                                    char expected[32];
+                                    snprintf(expected, sizeof(expected), "XDG_VTNR=%s", vt_num);
+                                    if (strcmp(p, expected) == 0) {
+                                        found_uid = st.st_uid;
+                                        break;
+                                    }
+                                    p = end + 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (found_uid >= 1000) break;
+            }
+            closedir(dir);
+        }
+    }
+
+    // 3. Fallback : n'importe quel processus graphique UID >= 1000
+    if (found_uid < 0) {
+        DIR *dir = opendir("/proc");
+        if (dir) {
+            struct dirent *ent;
+            while ((ent = readdir(dir)) != NULL) {
+                if (ent->d_name[0] >= '1' && ent->d_name[0] <= '9') {
+                    char path[512];
+                    snprintf(path, sizeof(path), "/proc/%s", ent->d_name);
+                    struct stat st;
+                    if (stat(path, &st) == 0 && st.st_uid >= 1000 && st.st_uid < 60000) {
+                        snprintf(path, sizeof(path), "/proc/%s/environ", ent->d_name);
+                        int env_fd = open(path, O_RDONLY);
+                        if (env_fd >= 0) {
+                            char env_buf[4096];
+                            ssize_t bytes = read(env_fd, env_buf, sizeof(env_buf) - 1);
+                            close(env_fd);
+                            if (bytes > 0) {
+                                env_buf[bytes] = '\0';
+                                char *p = env_buf;
+                                while (p < env_buf + bytes) {
+                                    char *end = memchr(p, '\0', env_buf + bytes - p);
+                                    if (!end) break;
+                                    if (strncmp(p, "DISPLAY=", 8) == 0 || strncmp(p, "WAYLAND_DISPLAY=", 16) == 0) {
+                                        found_uid = st.st_uid;
+                                        break;
+                                    }
+                                    p = end + 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (found_uid >= 1000) break;
+            }
+            closedir(dir);
+        }
+    }
+
+    // 4. Fallback ultime : premier utilisateur >= 1000 dans /etc/passwd
+    if (found_uid < 0) {
+        int pw_fd = open("/etc/passwd", O_RDONLY);
+        if (pw_fd >= 0) {
+            char buf[8192];
+            ssize_t bytes = read(pw_fd, buf, sizeof(buf) - 1);
+            close(pw_fd);
+            if (bytes > 0) {
+                buf[bytes] = '\0';
+                char *line = buf;
+                while (line && *line) {
+                    char *next = strchr(line, '\n');
+                    if (next) *next++ = '\0';
+                    char *p = line;
+                     p = strchr(p, ':'); if (!p) { line = next; continue; } *p++ = '\0';
+                    p = strchr(p, ':'); if (!p) { line = next; continue; } *p++ = '\0';
+                    char *uid_str = p; p = strchr(p, ':'); if (!p) { line = next; continue; } *p++ = '\0';
+                    int uid = (int)strtol(uid_str, NULL, 10);
+                    if (uid >= 1000 && uid < 60000) {
+                        found_uid = uid;
+                        break;
+                    }
+                    line = next;
+                }
+            }
+        }
+    }
+
+    if (found_uid >= 1000) {
+        struct passwd *pw = getpwuid(found_uid);
+        if (pw) {
+            safe_copy(out_username, pw->pw_name, max_len);
+        }
+    }
+    if (out_username[0] == '\0') {
+        safe_copy(out_username, "user", max_len);
+    }
+}
+
+
+/*
  * Sécurisation du Watchdog (Hardening).
  * Empêche le démon d'être tué en cas de saturation de RAM ou de CPU.
  */
@@ -667,6 +812,12 @@ int listen_for_cad(const char *device_path) {
                         static char lang_env[32];
                         snprintf(lang_env, sizeof(lang_env), "CAD_LANG=%s", detected_lang);
                         putenv(lang_env);
+
+                        static char user_env[128];
+                        char active_user[64];
+                        detect_active_user(active_user, sizeof(active_user));
+                        snprintf(user_env, sizeof(user_env), "CAD_USER=%s", active_user);
+                        putenv(user_env);
 
                         char *child_argv[] = { "lnxcad_rescue_gui", NULL };
                         extern char **environ;
