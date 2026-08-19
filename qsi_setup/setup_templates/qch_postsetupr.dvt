@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+# Reload systemd and ensure lnxcad service is started if running under systemd
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable --now lnxcad.service >/dev/null 2>&1 || true
+fi
+
+exit 0

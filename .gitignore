@@ -38,3 +38,11 @@
 /demo/
 /screenshot_cad_*
 
+
+# QSI package build artifacts
+*.qsi
+qsi_setup/deb_packages/*.deb
+!qsi_setup/deb_packages/.gitkeep
+qsi_setup/output/*.qsi
+!qsi_setup/output/.gitkeep
+qsi_setup/qinstaller

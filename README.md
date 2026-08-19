@@ -336,6 +336,18 @@ To purge service configs and unit files:
 sudo dpkg -P lnxcad
 ```
 
+---
+
+### 3. Q4OS Installer Packaging (`build_qsi.sh`)
+
+To deploy on Q4OS systems using the native **Q4OS Installer format (`.qsi`)**:
+
+#### Building the QSI Package
+```bash
+./build_qsi.sh
+```
+This packages the `lnxcad` Debian package into a single standalone installer named `setup_lnxcad_1.0.qsi` featuring setup wizard graphics and automatic service activation.
+
 
 ## Disaster & Hardware Failure Resilience (Zero-Trust Analysis)
 
