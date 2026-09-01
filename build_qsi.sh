@@ -72,6 +72,9 @@ cp -a "$LATEST_DEB" "$DEB_DIR/"
 if [ -f "$TEMPLATES_DIR/qch_postsetupr.dvt" ]; then
     chmod +x "$TEMPLATES_DIR/qch_postsetupr.dvt"
 fi
+if [ -f "$TEMPLATES_DIR/qch_preaptr.dvt" ]; then
+    chmod +x "$TEMPLATES_DIR/qch_preaptr.dvt"
+fi
 
 # 5. Generate qinstaller configuration with full absolute paths
 cat <<EOF > "$QSI_DIR/qinstaller"

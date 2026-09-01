@@ -55,6 +55,14 @@ cat << 'EOF' > "$BUILD_DIR/DEBIAN/postinst"
 #!/bin/sh
 set -e
 
+# Configuration automatique du dépôt APT pour les futures mises à jour
+if [ -d /etc/apt/sources.list.d ]; then
+    cat << 'REPEOF' > /etc/apt/sources.list.d/lnxcad.list
+# lnxcad APT Repository
+deb [trusted=yes] https://seb3773.github.io/lnxCAD/ stable main
+REPEOF
+fi
+
 BIN_DEST="/usr/sbin/lnxcad"
 
 if [ "$1" = "configure" ]; then
@@ -379,6 +387,10 @@ EOF
 cat << 'EOF' > "$BUILD_DIR/DEBIAN/postrm"
 #!/bin/sh
 set -e
+
+if [ "$1" = "purge" ] || [ "$1" = "remove" ]; then
+    rm -f /etc/apt/sources.list.d/lnxcad.list
+fi
 
 if [ "$1" = "purge" ]; then
     echo "lnxCAD: purging service files..."
