@@ -318,11 +318,11 @@ If you want to deploy lnxCAD on multiple Debian/Ubuntu servers, you can build a 
 ```bash
 ./build_deb.sh
 ```
-This builds a package named `lnxcad_1.0_amd64.deb` which contains the compiled `lnxcad` watchdog binary and configures the startup hook scripts under `DEBIAN/`.
+This builds a package named `lnxcad_1.1_amd64.deb` which contains the compiled `lnxcad` watchdog binary and configures the startup hook scripts under `DEBIAN/`.
 
 #### Deploying the Package
 ```bash
-sudo dpkg -i lnxcad_1.0_amd64.deb
+sudo dpkg -i lnxcad_1.1_amd64.deb
 ```
 The package has **no dependencies** (since `lnxcad` is built statically), and automatically invokes the init detection logic during its `postinst` stage to configure and start the daemon.
 
@@ -346,7 +346,7 @@ To deploy on Q4OS systems using the native **Q4OS Installer format (`.qsi`)**:
 ```bash
 ./build_qsi.sh
 ```
-This packages the `lnxcad` Debian package into a single standalone installer named `setup_lnxcad_1.0.qsi` featuring setup wizard graphics and automatic service activation.
+This packages the `lnxcad` Debian package into a single standalone installer named `setup_lnxcad_1.1.qsi` featuring setup wizard graphics and automatic service activation.
 
 
 ## Disaster & Hardware Failure Resilience (Zero-Trust Analysis)

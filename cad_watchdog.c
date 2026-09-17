@@ -839,7 +839,13 @@ int listen_for_cad(const char *device_path) {
                     } else if (pid > 0) {
                         /* Dans le père : Attente de la fermeture de la GUI */
                         while (waitpid(pid, NULL, 0) < 0) {
-                            if (errno != EINTR) break;
+                            if (errno == EINTR) {
+                                if (terminate_requested) {
+                                    kill(pid, SIGTERM);
+                                }
+                                continue;
+                            }
+                            break;
                         }
                         if (isatty(0)) {
                             tcflush(0, TCIFLUSH);
@@ -860,7 +866,7 @@ int listen_for_cad(const char *device_path) {
     }
 
     close(fd);
-    return -1; // Perte de connexion ou erreur de lecture
+    return terminate_requested ? 0 : -1; // Perte de connexion ou demande d'arrêt
 }
 
 int main(int argc, char **argv) {
@@ -876,6 +882,16 @@ int main(int argc, char **argv) {
         force_path = 1;
     }
 
+    // Configuration des signaux SANS SA_RESTART pour interrompre immédiatement les syscalls bloquants (read/waitpid/usleep)
+    struct sigaction sa = {0};
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0; // Pas de SA_RESTART : permet l'interruption immédiate sur SIGTERM lors du shutdown
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT,  &sa, NULL);
+    sigaction(SIGQUIT, &sa, NULL);
+    sigaction(SIGHUP,  &sa, NULL);
+
     // Élévation de priorité et sécurisation du démon
     harden_daemon();
 
@@ -886,14 +902,8 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // Configuration des signaux et atexit pour nettoyer les fichiers temporaires
+    // Configuration d'atexit pour nettoyer les fichiers temporaires
     atexit(cleanup_on_exit);
-    struct sigaction sa = {0};
-    sa.sa_handler = signal_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
-    sigaction(SIGTERM, &sa, NULL);
-    sigaction(SIGINT, &sa, NULL);
 
     // Boucle infinie pour gérer le hotplugging / les déconnexions du clavier
     while (!terminate_requested) {

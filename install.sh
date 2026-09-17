@@ -116,6 +116,9 @@ RestartSec=2
 OOMScoreAdjust=-1000
 Nice=-20
 SupplementaryGroups=input
+TimeoutStopSec=5s
+KillMode=mixed
+KillSignal=SIGTERM
 
 [Install]
 WantedBy=multi-user.target

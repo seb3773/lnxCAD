@@ -4,7 +4,7 @@
 set -e
 
 PACKAGE_NAME="lnxcad"
-VERSION="1.0"
+VERSION="1.1"
 ARCH="amd64"
 BUILD_DIR="${PACKAGE_NAME}_${VERSION}_${ARCH}"
 
@@ -118,6 +118,9 @@ RestartSec=2
 OOMScoreAdjust=-1000
 Nice=-20
 SupplementaryGroups=input
+TimeoutStopSec=5s
+KillMode=mixed
+KillSignal=SIGTERM
 
 [Install]
 WantedBy=multi-user.target
